@@ -1,0 +1,21 @@
+configuration:
+  discovery:
+    name: Auto-discover speakers
+    description: Find Lithe Audio speakers on the LAN through mDNS (AirPlay advertisement).
+  speakers:
+    name: Speakers
+    description: Extra speaker IPs or hostnames, for speakers mDNS can't see.
+  mqtt_enabled:
+    name: MQTT entities
+    description: Create Home Assistant entities through MQTT discovery.
+  mqtt_host:
+    name: MQTT host
+    description: Leave empty to use the Mosquitto add-on automatically.
+  mqtt_port:
+    name: MQTT port
+  mqtt_username:
+    name: MQTT username
+  mqtt_password:
+    name: MQTT password
+  log_level:
+    name: Log level

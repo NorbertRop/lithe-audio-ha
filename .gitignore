@@ -1,0 +1,5 @@
+__pycache__/
+*.pem
+*.p12
+*.apk
+*.xapk

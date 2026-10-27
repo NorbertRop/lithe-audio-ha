@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lithe Audio</title>
+<style>
+  :root {
+    --bg: #f4f5f7; --card: #fff; --text: #1c1d21; --muted: #6b6f76; --line: #e3e5e8; --accent: #2f6fde;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #111214; --card: #1c1d21; --text: #ececee; --muted: #9a9ea6; --line: #2c2e33; --accent: #6c9cff; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.4 system-ui, -apple-system, sans-serif; }
+  main { max-width: 720px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  .head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 4px; }
+  h2 { margin: 0; font-size: 18px; }
+  .meta { color: var(--muted); font-size: 13px; }
+  .now { color: var(--muted); margin: 0 0 12px; min-height: 1.4em; }
+  .offline { opacity: .5; pointer-events: none; }
+  .row { display: grid; grid-template-columns: 90px 1fr 36px; align-items: center; gap: 12px; padding: 6px 0; }
+  .row output { text-align: right; font-variant-numeric: tabular-nums; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px 16px; margin-top: 8px; }
+  label.sw { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; }
+  select { width: 100%; padding: 6px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--text); }
+  .transport { display: flex; gap: 8px; margin-bottom: 8px; }
+  button { flex: 1; padding: 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--text); font-size: 16px; cursor: pointer; }
+  h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 16px 0 4px; }
+  .empty { color: var(--muted); text-align: center; padding: 40px 0; }
+</style>
+</head>
+<body>
+<main id="root"><p class="empty">Looking for speakers…</p></main>
+<script>
+const SLIDERS = [["volume", 0, 100], ["treble", -6, 6], ["mid", -6, 6], ["bass", -6, 6], ["balance", -6, 6]];
+const SWITCHES = [["loudness", "Loudness"], ["night_mode", "Night mode"], ["high_pass_filter", "High-pass filter"],
+                  ["bluetooth", "Bluetooth"], ["aux_in", "AUX in"]];
+let meta = {presets: [], outputs: []};
+let busy = 0;
+
+async function send(id, key, value) {
+  busy = Date.now();
+  await fetch(`api/speakers/${id}/${key}`, {method: "POST", headers: {"Content-Type": "application/json"},
+                                            body: JSON.stringify({value})});
+}
+
+function card(s) {
+  const el = document.createElement("section");
+  el.className = "card";
+  el.dataset.id = s.id;
+  el.innerHTML = `
+    <div class="head"><h2></h2><span class="meta"></span></div>
+    <p class="now"></p>
+    <div class="transport">
+      <button data-cmd="previous" title="Previous">⏮</button><button data-cmd="play" title="Play">▶</button>
+      <button data-cmd="pause" title="Pause">⏸</button><button data-cmd="next" title="Next">⏭</button>
+    </div>
+    ${SLIDERS.map(([k, min, max]) => `<div class="row"><span>${k[0].toUpperCase() + k.slice(1)}</span>
+      <input type="range" data-key="${k}" min="${min}" max="${max}" step="1"><output data-out="${k}"></output></div>`).join("")}
+    <h3>Sound</h3>
+    <div class="grid2">
+      <label>Preset<select data-key="preset"></select></label>
+      <label>Output<select data-key="output"></select></label>
+    </div>
+    <div class="grid2">${SWITCHES.map(([k, l]) =>
+      `<label class="sw">${l}<input type="checkbox" data-key="${k}"></label>`).join("")}</div>`;
+  el.querySelectorAll("button").forEach(b => b.onclick = () => send(s.id, b.dataset.cmd, null));
+  el.querySelectorAll("input[type=range]").forEach(r => {
+    r.oninput = () => { el.querySelector(`[data-out=${r.dataset.key}]`).textContent = r.value; busy = Date.now(); };
+    r.onchange = () => send(s.id, r.dataset.key, +r.value);
+  });
+  el.querySelectorAll("input[type=checkbox]").forEach(c => c.onchange = () => send(s.id, c.dataset.key, c.checked));
+  el.querySelectorAll("select").forEach(sel => {
+    const opts = sel.dataset.key === "preset" ? meta.presets : meta.outputs;
+    sel.innerHTML = opts.map(o => `<option>${o}</option>`).join("");
+    sel.onchange = () => send(s.id, sel.dataset.key, sel.value);
+  });
+  return el;
+}
+
+function update(el, s) {
+  el.classList.toggle("offline", !s.available);
+  el.querySelector("h2").textContent = s.name || s.host;
+  el.querySelector(".meta").textContent = [s.model, s.host, s.available ? "" : "offline"].filter(Boolean).join(" · ");
+  el.querySelector(".now").textContent = [s.play_state, [s.artist, s.title].filter(Boolean).join(" – ")]
+    .filter(Boolean).join(": ");
+  if (Date.now() - busy < 1500) return;  // don't fight the user's drag
+  for (const [k] of SLIDERS) {
+    if (s[k] === undefined) continue;
+    el.querySelector(`input[data-key=${k}]`).value = s[k];
+    el.querySelector(`[data-out=${k}]`).textContent = s[k];
+  }
+  for (const [k] of SWITCHES) {
+    const c = el.querySelector(`input[data-key=${k}]`);
+    c.checked = !!s[k];
+    c.closest("label").style.display = s[k] === undefined ? "none" : "";
+  }
+  for (const k of ["preset", "output"]) if (s[k] !== undefined) el.querySelector(`select[data-key=${k}]`).value = s[k];
+}
+
+async function refresh() {
+  try {
+    const data = await (await fetch("api/speakers")).json();
+    meta = data;
+    const root = document.getElementById("root");
+    if (!data.speakers.length) return;
+    root.querySelector(".empty")?.remove();
+    for (const s of data.speakers) {
+      let el = root.querySelector(`[data-id="${s.id}"]`);
+      if (!el) { el = card(s); root.append(el); }
+      update(el, s);
+    }
+  } catch (e) { console.warn(e); }
+}
+refresh();
+setInterval(refresh, 2000);
+</script>
+</body>
+</html>
