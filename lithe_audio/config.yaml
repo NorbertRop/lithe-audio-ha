@@ -1,5 +1,5 @@
 name: Lithe Audio
-version: "0.1.0"
+version: "0.1.1"
 slug: lithe_audio
 description: Local EQ, volume and settings control for Lithe Audio Wi-Fi speakers
 url: https://github.com/NorbertRop/lithe-audio-ha

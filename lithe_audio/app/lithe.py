@@ -15,6 +15,7 @@ import asyncio
 import json
 import logging
 import re
+import socket
 import ssl
 import struct
 from collections.abc import Callable
@@ -23,6 +24,11 @@ from pathlib import Path
 _LOGGER = logging.getLogger(__name__)
 
 LUCI_PORT = 7777
+LSSDP_PORT = 1800
+LSSDP_SEARCH = (
+    b'M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1800\r\nMAN: "ssdp:discover"\r\n'
+    b"ST: urn:schemas-upnp-org:device:DDMSServer:1\r\nMX: 10\r\n\r\n"
+)
 TUNNEL_PORT = 50007
 # /config is the add-on's addon_config folder; certs/ is for local development.
 CERT_FILES = (Path("/config/client.pem"), Path(__file__).parent / "certs" / "client.pem")
@@ -73,6 +79,7 @@ POLL_INTERVAL = 30
 # The MCU drops tunnel commands that arrive back to back.
 TUNNEL_SPACING = 0.12
 MAC_RE = re.compile(r"([0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5})")
+USN_RE = re.compile(r"^USN:\s*([0-9A-Fa-f]{12})\s*$", re.MULTILINE)
 RECONNECT_DELAY = 10
 
 
@@ -97,6 +104,25 @@ def tunnel_packet(cmd: tuple[int, int], data: bytes = b"") -> bytes:
     packet = bytearray([length >> 8, length & 0xFF, 0, cmd[0], cmd[1]]) + data
     packet[2] = sum(packet[3:]) & 0xFF
     return bytes(packet)
+
+
+def lssdp_mac(host: str) -> str | None:
+    """Read the MAC from the speaker's LSSDP reply (USN header).
+
+    Firmware 4083.124 returns the IP instead of the MAC in message box 91.
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+        sock.settimeout(3)
+        sock.sendto(LSSDP_SEARCH, (host, LSSDP_PORT))
+        try:
+            data, _ = sock.recvfrom(2048)
+        except OSError:
+            return None
+    match = USN_RE.search(data.decode("utf-8", "replace"))
+    if not match:
+        return None
+    usn = match.group(1).upper()
+    return ":".join(usn[i : i + 2] for i in range(0, 12, 2))
 
 
 def _ssl_context() -> ssl.SSLContext:
@@ -217,6 +243,8 @@ class LitheSpeaker:
         luci_r, self._luci = await asyncio.wait_for(
             asyncio.open_connection(self.host, LUCI_PORT, ssl=_ssl_context()), 10
         )
+        if "mac" not in self.info and (mac := await asyncio.to_thread(lssdp_mac, self.host)):
+            self.info["mac"] = mac
         local_ip = self._luci.get_extra_info("sockname")[0]
         self._send_luci(MB_REGISTER, LUCI_SET, local_ip)
         self._send_luci(MB_TUNNEL_START, LUCI_SET, str(TUNNEL_PORT))
